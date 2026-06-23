@@ -8,14 +8,17 @@ export default defineConfig({
     emptyOutDir: true,
     sourcemap: true,
     lib: {
-      entry: resolve("src/index.ts"),
+      entry: {
+        "nix-js-auth": resolve("src/index.ts"),
+        "command": resolve("src/command.ts"),
+      },
       name: "NixJsAuth",
       formats: ["es", "cjs"],
-      fileName: (format) =>
-        format === "cjs" ? "nix-js-auth.cjs" : "nix-js-auth.js",
+      fileName: (format, entryName) =>
+        `${entryName}.${format === "cjs" ? "cjs" : "js"}`,
     },
     rollupOptions: {
-      external: ["@deijose/nix-js"],
+      external: ["@deijose/nix-js", "@deijose/nix-query"],
       output: {
         preserveModules: false,
         globals: {

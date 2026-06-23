@@ -93,30 +93,35 @@ export function createAuth<
   const isAuthenticated = computed(() => user.value !== null);
   const isAnonymous = computed(() => user.value === null);
 
-  let refreshTimer: ReturnType<typeof setTimeout> | null = null;
+  const autoRefreshEnabled = Boolean(autoRefresh);
+  const autoRefreshConfig = typeof autoRefresh === "object" ? autoRefresh : {};
+
+  let refreshDispose: (() => void) | null = null;
 
   function clearAutoRefresh() {
-    if (refreshTimer) {
-      clearTimeout(refreshTimer);
-      refreshTimer = null;
+    if (refreshDispose) {
+      refreshDispose();
+      refreshDispose = null;
     }
+  }
+
+  function defaultSchedule(session: Session, refresh: () => Promise<void>): () => void {
+    const d = activeDriver.value;
+    const expiresAt = d?.getExpiry?.(session);
+    if (!expiresAt) return () => { };
+    const beforeMs = (autoRefreshConfig.beforeExpirySeconds ?? 60) * 1000;
+    const delay = Math.max(0, expiresAt - Date.now() - beforeMs);
+    const timer = setTimeout(() => {
+      void refresh();
+    }, delay);
+    return () => clearTimeout(timer);
   }
 
   function scheduleAutoRefresh(s: Session) {
     clearAutoRefresh();
-    if (!autoRefresh) return;
-    const d = activeDriver.value;
-    if (!d?.getExpiry) return;
-    const expiresAt = d.getExpiry(s);
-    if (!expiresAt) return;
-    const before =
-      typeof autoRefresh === "object" && autoRefresh.beforeExpirySeconds
-        ? autoRefresh.beforeExpirySeconds * 1000
-        : 60_000;
-    const delay = Math.max(0, expiresAt - Date.now() - before);
-    refreshTimer = setTimeout(() => {
-      void refresh();
-    }, delay);
+    if (!autoRefreshEnabled) return;
+    const scheduler = autoRefreshConfig.schedule ?? defaultSchedule;
+    refreshDispose = scheduler(s, refresh);
   }
 
   function setSession(next: Session | null) {
@@ -226,15 +231,14 @@ export function createAuth<
     }
     try {
       const raw = await storage.get();
-      if (raw === null) {
-        isReady.value = true;
-        return;
-      }
-      let hydrated: Session | null = raw;
+      let hydrated: Session | null = null;
       if (d?.hydrate) {
         hydrated = await d.hydrate(raw);
-      } else if (d?.isValid && !d.isValid(raw)) {
-        hydrated = null;
+      } else if (raw !== null) {
+        hydrated = raw;
+        if (d?.isValid && !d.isValid(raw)) {
+          hydrated = null;
+        }
       }
       if (hydrated !== null) {
         setSession(hydrated);

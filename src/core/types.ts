@@ -36,13 +36,18 @@ export interface AuthIdentity<User> {
   scopes?: IdentityResolver<User>;
 }
 
+export interface AutoRefreshOptions<Session> {
+  beforeExpirySeconds?: number;
+  schedule?: (session: Session, refresh: () => Promise<void>) => (() => void);
+}
+
 export interface CreateAuthOptions<Session, User, Credentials> {
   driver?: AuthDriver<Session, User, Credentials>;
   providers?: Record<string, AuthDriver<Session, User, Credentials>>;
   defaultProvider?: string;
 
   storage?: AuthStorage<Session>;
-  autoRefresh?: boolean | { beforeExpirySeconds?: number };
+  autoRefresh?: boolean | AutoRefreshOptions<Session>;
 
   identity?: AuthIdentity<User>;
 

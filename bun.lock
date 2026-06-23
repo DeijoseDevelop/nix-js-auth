@@ -6,6 +6,7 @@
       "name": "@deijose/nix-js-auth",
       "devDependencies": {
         "@deijose/nix-js": "^2.5.3",
+        "@deijose/nix-query": "^1.3.7",
         "happy-dom": "^20.8.3",
         "terser": "^5.46.0",
         "typescript": "~5.9.3",
@@ -14,11 +15,17 @@
       },
       "peerDependencies": {
         "@deijose/nix-js": "^2.5.3",
+        "@deijose/nix-query": "^1.3.7",
       },
+      "optionalPeers": [
+        "@deijose/nix-query",
+      ],
     },
   },
   "packages": {
     "@deijose/nix-js": ["@deijose/nix-js@2.5.3", "", {}, "sha512-rGZPhRWLURE2xEUOi43QtMgkxNIZgj4saFh9P8J5hjkW8DoyNvH1KTo8X6x6fDNPQXDw5hLxvvOti5cSZRTVeg=="],
+
+    "@deijose/nix-query": ["@deijose/nix-query@1.3.7", "", { "peerDependencies": { "@deijose/nix-js": "^2.5.3" } }, "sha512-5/bCcLyGytYP9RpTYgYuZJEK0NCKdkM5rU4hvKDHy/nqkwIMhHpssuK4iLSK4mguBnhsaP2ksdAuLjs6aXfLMw=="],
 
     "@emnapi/core": ["@emnapi/core@1.11.1", "", { "dependencies": { "@emnapi/wasi-threads": "1.2.2", "tslib": "^2.4.0" } }, "sha512-RSvbQmHzdKzNsLYa/wHrbc3KN4sYLKAdPZxqiM2HATqv/SBk2/ENSHpvXGaLOMcsAyz0poEGqkmmKYG3OWiJEQ=="],
 

@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.2.0
+
+### Added
+
+- `sessionCookieDriver` for `httpOnly` session cookie authentication.
+- `apiKeyProvider` for API-key authentication.
+- `cookieAdapter` storage adapter for `document.cookie` persistence.
+- Custom `autoRefresh` schedule support via `AutoRefreshOptions<Session>`.
+- Optional `nix-query` integration via the `@deijose/nix-js-auth/command` subpath.
+  - `authCommand` — injects the current token into command context.
+  - `createLoginCommand` / `createLogoutCommand` — wrap `auth.login` and `auth.logout` as commands.
+  - `authHeaders` — helper to build `Authorization` headers.
+- `hydrate` is now called even when storage is empty, enabling session recovery from the server.
+
+### Changed
+
+- Refactored test suite into module-based files.
+
 ## 0.1.0
 
 ### Added

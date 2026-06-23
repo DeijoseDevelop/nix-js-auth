@@ -9,10 +9,18 @@ export type {
   IdentityResolver,
   PolicyDecision,
   AuthEvent,
+  AutoRefreshOptions,
 } from "./core/types";
 
 export { jwtDriver } from "./drivers/jwtDriver";
 export type { JwtSession, JwtCredentials, JwtDriverOptions } from "./drivers/jwtDriver";
+
+export { sessionCookieDriver } from "./drivers/sessionCookieDriver";
+export type {
+  SessionCookieSession,
+  SessionCookieCredentials,
+  SessionCookieDriverOptions,
+} from "./drivers/sessionCookieDriver";
 
 export { mockDriver } from "./drivers/mockDriver";
 export type { MockDriverOptions } from "./drivers/mockDriver";
@@ -20,11 +28,17 @@ export type { MockDriverOptions } from "./drivers/mockDriver";
 export { credentialsProvider } from "./providers/credentialsProvider";
 export type { CredentialsProviderOptions } from "./providers/credentialsProvider";
 
+export { apiKeyProvider } from "./providers/apiKeyProvider";
+export type { ApiKeyProviderOptions, ApiKeyCredentials } from "./providers/apiKeyProvider";
+
 export { localStorageAdapter } from "./storage/localStorageAdapter";
 export type { LocalStorageAdapterOptions } from "./storage/localStorageAdapter";
 
 export { sessionStorageAdapter } from "./storage/sessionStorageAdapter";
 export type { SessionStorageAdapterOptions } from "./storage/sessionStorageAdapter";
+
+export { cookieAdapter } from "./storage/cookieAdapter";
+export type { CookieAdapterOptions } from "./storage/cookieAdapter";
 
 export { memoryAdapter } from "./storage/memoryAdapter";
 

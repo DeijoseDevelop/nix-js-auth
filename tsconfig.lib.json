@@ -8,6 +8,11 @@
     "emitDeclarationOnly": true,
     "rootDir": "src"
   },
-  "include": ["src/index.ts"],
-  "exclude": ["src/__tests__"]
+  "include": [
+    "src/index.ts",
+    "src/command.ts"
+  ],
+  "exclude": [
+    "src/__tests__"
+  ]
 }

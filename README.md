@@ -21,6 +21,8 @@ Authentication and authorization library for [Nix.js](https://nix-js.dev) built 
 - [Router integration](#router-integration)
 - [Optional provide/inject](#optional-provideinject)
 - [Multi-provider](#multi-provider)
+- [Auto-refresh](#auto-refresh)
+- [Optional `nix-query` integration](#optional-nix-query-integration)
 - [Testing](#testing)
 - [Best practices](#best-practices)
 - [TypeScript](#typescript)
@@ -36,7 +38,9 @@ Authentication and authorization library for [Nix.js](https://nix-js.dev) built 
 - **Router integration**: declarative `meta.auth` DSL and standalone guards.
 - **Optional `provide/inject`**: use `auth` directly or inject it via `useAuth()`.
 - **Multiple providers**: support email/password, API keys, and other strategies in the same app.
-- **Auto-refresh**: automatically refresh tokens before expiry when the driver provides it.
+- **Auto-refresh**: automatically refresh tokens before expiry; custom schedules supported.
+- **Storage adapters**: localStorage, sessionStorage, cookies, and memory.
+- **Optional `nix-query` integration**: auth-aware commands via `@deijose/nix-js-auth/command`.
 - **TypeScript-first**: full generic support for `Session`, `User`, and `Credentials`.
 
 ## Installation
@@ -114,11 +118,16 @@ interface CreateAuthOptions<Session, User, Credentials> {
   providers?: Record<string, AuthDriver<Session, User, Credentials>>;
   defaultProvider?: string;
   storage?: AuthStorage<Session>;
-  autoRefresh?: boolean | { beforeExpirySeconds?: number };
+  autoRefresh?: boolean | AutoRefreshOptions<Session>;
   identity?: AuthIdentity<User>;
   onChange?: (session: Session | null) => void;
   onError?: (error: unknown, event: AuthEvent) => void;
   name?: string;
+}
+
+interface AutoRefreshOptions<Session> {
+  beforeExpirySeconds?: number;
+  schedule?: (session: Session, refresh: () => Promise<void>) => (() => void);
 }
 ```
 
@@ -226,6 +235,25 @@ interface JwtSession<User> {
 }
 ```
 
+### `sessionCookieDriver(options)`
+
+For backends that use `httpOnly` session cookies. The browser sends the cookie automatically with `credentials: "include"`.
+
+```ts
+import { sessionCookieDriver } from "@deijose/nix-js-auth";
+
+const auth = createAuth({
+  driver: sessionCookieDriver({
+    loginUrl: "/api/login",
+    logoutUrl: "/api/logout",
+    sessionUrl: "/api/session",
+  }),
+  storage: cookieAdapter({ key: "app:session" }),
+});
+```
+
+The driver will call `sessionUrl` during hydration to recover the current user from the server. If the session is expired, the server should return `401` and the driver will return `null`.
+
 ### `mockDriver(options)`
 
 Useful for tests and prototypes.
@@ -322,12 +350,36 @@ await auth.login("apiKey", { key: "secret" });
 console.log(auth.activeProvider.value); // "apiKey"
 ```
 
+### `apiKeyProvider(options)`
+
+Provider for API-key authentication.
+
+```ts
+import { apiKeyProvider } from "@deijose/nix-js-auth";
+
+const auth = createAuth({
+  providers: {
+    apiKey: apiKeyProvider({
+      validate: async (key) => {
+        const res = await fetch("/api/validate-key", {
+          headers: { "x-api-key": key },
+        });
+        return res.json();
+      },
+    }),
+  },
+  defaultProvider: "apiKey",
+});
+
+await auth.login("apiKey", { key: "secret" });
+```
+
 ## Storage adapters
 
 Storage adapters are responsible for persisting the session between reloads.
 
 ```ts
-import { localStorageAdapter, sessionStorageAdapter, memoryAdapter } from "@deijose/nix-js-auth";
+import { localStorageAdapter, sessionStorageAdapter, cookieAdapter, memoryAdapter } from "@deijose/nix-js-auth";
 
 const auth = createAuth({
   driver,
@@ -342,6 +394,17 @@ Persists to `localStorage`. Falls back to in-memory if storage is unavailable.
 ### `sessionStorageAdapter({ key })`
 
 Persists to `sessionStorage`.
+
+### `cookieAdapter({ key })`
+
+Persists to `document.cookie`. Useful for non-`httpOnly` session data or for sharing small state with the server.
+
+```ts
+const auth = createAuth({
+  driver,
+  storage: cookieAdapter({ key: "app:session", days: 7, sameSite: "lax" }),
+});
+```
 
 ### `memoryAdapter()`
 
@@ -560,6 +623,70 @@ await auth.login("credentials", { email, password });
 await auth.login("apiKey", { key: "secret" });
 
 console.log(auth.activeProvider.value); // "apiKey"
+```
+
+## Auto-refresh
+
+When a driver provides `getExpiry`, the library can refresh the session before it expires.
+
+```ts
+const auth = createAuth({
+  driver: jwtDriver({
+    loginUrl: "/api/login",
+    refreshUrl: "/api/refresh",
+  }),
+  autoRefresh: true, // default: 60 seconds before expiry
+});
+```
+
+### Custom refresh schedule
+
+For advanced control, provide a custom scheduler:
+
+```ts
+const auth = createAuth({
+  driver,
+  autoRefresh: {
+    beforeExpirySeconds: 120,
+    schedule(session, refresh) {
+      const d = driver.getExpiry?.(session);
+      if (!d) return () => {};
+      const delay = Math.max(0, d - Date.now() - 120_000);
+      const timer = setTimeout(() => void refresh(), delay);
+      return () => clearTimeout(timer);
+    },
+  },
+});
+```
+
+## Optional `nix-query` integration
+
+`@deijose/nix-query` is an **optional** peer dependency. If you already use it, you can wrap auth-aware commands from the `./command` subpath.
+
+```bash
+npm install @deijose/nix-query
+```
+
+```ts
+import { authCommand, createLoginCommand, createLogoutCommand, authHeaders } from "@deijose/nix-js-auth/command";
+
+// Inject the current token into any command
+const savePost = authCommand(auth, "post/save", async (payload, ctx) => {
+  const res = await fetch("/api/posts", {
+    method: "POST",
+    headers: {
+      ...authHeaders(auth),
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(payload),
+    signal: ctx.signal,
+  });
+  return res.json();
+});
+
+// Or expose login/logout as commands
+const login = createLoginCommand(auth, "auth/login");
+const logout = createLogoutCommand(auth, "auth/logout");
 ```
 
 ## Testing
