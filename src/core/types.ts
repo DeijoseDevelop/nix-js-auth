@@ -48,6 +48,7 @@ export interface CreateAuthOptions<Session, User, Credentials> {
 
   storage?: AuthStorage<Session>;
   autoRefresh?: boolean | AutoRefreshOptions<Session>;
+  seed?: Session | (() => Session | null);
 
   identity?: AuthIdentity<User>;
 

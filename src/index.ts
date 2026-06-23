@@ -1,4 +1,6 @@
 export { createAuth } from "./core/createAuth";
+export { createAuthManager } from "./core/authManager";
+export type { AuthManager } from "./core/authManager";
 export type {
   AuthInstance,
   AuthDriver,
@@ -30,6 +32,15 @@ export type { CredentialsProviderOptions } from "./providers/credentialsProvider
 
 export { apiKeyProvider } from "./providers/apiKeyProvider";
 export type { ApiKeyProviderOptions, ApiKeyCredentials } from "./providers/apiKeyProvider";
+
+export { oidcProvider } from "./providers/oidcProvider";
+export type {
+  OidcProviderOptions,
+  OidcCredentials,
+  OidcSession,
+  OidcLoginUrl,
+  OidcProvider,
+} from "./providers/oidcProvider";
 
 export { localStorageAdapter } from "./storage/localStorageAdapter";
 export type { LocalStorageAdapterOptions } from "./storage/localStorageAdapter";

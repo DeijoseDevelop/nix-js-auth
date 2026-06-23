@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.0.0
+
+### Added
+
+- `createAuthManager` for managing multiple named auth instances.
+- `oidcProvider` — basic OIDC driver with PKCE, discovery, login/logout URL builders.
+- `rbacPolicy` tenant support via `resolveRoles(user, tenant)` and `resolvePermissions(user, tenant)`.
+- SSR `seed` option in `createAuth` for server-side rendering.
+
+### Changed
+
+- Library reaches 1.0.0 stable API.
+
 ## 0.2.0
 
 ### Added

@@ -17,6 +17,8 @@ Authentication and authorization library for [Nix.js](https://nix-js.dev) built 
 - [Drivers](#drivers)
 - [Providers](#providers)
 - [Storage adapters](#storage-adapters)
+- [Auth manager](#auth-manager)
+- [SSR seeds](#ssr-seeds)
 - [Policy engine](#policy-engine)
 - [Router integration](#router-integration)
 - [Optional provide/inject](#optional-provideinject)
@@ -32,14 +34,16 @@ Authentication and authorization library for [Nix.js](https://nix-js.dev) built 
 ## Features
 
 - **Signal-based state**: `auth.user`, `auth.isAuthenticated`, `auth.can(...)` are reactive signals.
-- **Driver-based core**: connect JWT, session cookies, API keys, or any custom backend.
+- **Driver-based core**: connect JWT, session cookies, API keys, OIDC, or any custom backend.
 - **Custom user model**: no forced `roles` or `permissions` fields; use identity mapping or custom policies.
-- **Policy engine**: compose authorization rules with `createPolicy`, `rbacPolicy`, and helpers.
+- **Policy engine**: compose authorization rules with `createPolicy`, `rbacPolicy` (with tenant support), and helpers.
 - **Router integration**: declarative `meta.auth` DSL and standalone guards.
 - **Optional `provide/inject`**: use `auth` directly or inject it via `useAuth()`.
-- **Multiple providers**: support email/password, API keys, and other strategies in the same app.
+- **Multiple providers**: support email/password, API keys, OIDC, and other strategies in the same app.
 - **Auto-refresh**: automatically refresh tokens before expiry; custom schedules supported.
 - **Storage adapters**: localStorage, sessionStorage, cookies, and memory.
+- **Auth manager**: `createAuthManager` for multi-context or multi-tenant apps.
+- **SSR seeds**: `seed` option for server-side rendering.
 - **Optional `nix-query` integration**: auth-aware commands via `@deijose/nix-js-auth/command`.
 - **TypeScript-first**: full generic support for `Session`, `User`, and `Credentials`.
 
@@ -119,6 +123,7 @@ interface CreateAuthOptions<Session, User, Credentials> {
   defaultProvider?: string;
   storage?: AuthStorage<Session>;
   autoRefresh?: boolean | AutoRefreshOptions<Session>;
+  seed?: Session | (() => Session | null);
   identity?: AuthIdentity<User>;
   onChange?: (session: Session | null) => void;
   onError?: (error: unknown, event: AuthEvent) => void;
@@ -374,6 +379,42 @@ const auth = createAuth({
 await auth.login("apiKey", { key: "secret" });
 ```
 
+### `oidcProvider(options)`
+
+Basic OIDC provider with PKCE. The provider discovers endpoints from the issuer's `/.well-known/openid-configuration`.
+
+```ts
+import { oidcProvider } from "@deijose/nix-js-auth";
+
+const provider = oidcProvider({
+  authority: "https://idp.example.com",
+  clientId: "client-id",
+  redirectUri: "https://app.example.com/callback",
+  postLogoutRedirectUri: "https://app.example.com",
+  scope: "openid profile email",
+});
+
+const auth = createAuth({ driver: provider });
+
+// 1. Start login
+const loginUrl = await provider.buildLoginUrl();
+window.location.href = loginUrl.url;
+// Save loginUrl.state, loginUrl.codeVerifier and loginUrl.nonce
+
+// 2. After callback, complete login
+const params = new URLSearchParams(window.location.search);
+const session = await auth.login({
+  code: params.get("code")!,
+  codeVerifier: savedCodeVerifier,
+  state: params.get("state")!,
+  nonce: savedNonce,
+});
+
+// 3. Logout redirect
+const logoutUrl = await provider.buildLogoutUrl(session.idToken);
+window.location.href = logoutUrl;
+```
+
 ## Storage adapters
 
 Storage adapters are responsible for persisting the session between reloads.
@@ -409,6 +450,51 @@ const auth = createAuth({
 ### `memoryAdapter()`
 
 In-memory only. Useful for tests and server-side rendering seeds.
+
+## Auth manager
+
+For apps that need multiple auth instances (multi-context, multi-tenant, or admin + customer portals):
+
+```ts
+import { createAuthManager, jwtDriver, localStorageAdapter } from "@deijose/nix-js-auth";
+
+const manager = createAuthManager();
+
+const customer = manager.create("customer", {
+  driver: jwtDriver({ loginUrl: "/api/customer/login" }),
+  storage: localStorageAdapter({ key: "customer:session" }),
+});
+
+const admin = manager.create("admin", {
+  driver: jwtDriver({ loginUrl: "/api/admin/login" }),
+  storage: localStorageAdapter({ key: "admin:session" }),
+});
+
+console.log(manager.list()); // ["customer", "admin"]
+console.log(manager.get("admin")); // AuthInstance
+
+manager.remove("customer");
+```
+
+## SSR seeds
+
+When rendering on the server, pass the initial session so the first client render is hydrated immediately:
+
+```ts
+const auth = createAuth({
+  driver,
+  seed: serverSession,
+});
+```
+
+You can also pass a function that returns the seed:
+
+```ts
+const auth = createAuth({
+  driver,
+  seed: () => readSessionFromRequest(request),
+});
+```
 
 ## Policy engine
 
@@ -484,6 +570,22 @@ auth.attachPolicy(
 
 auth.can("role:admin").value;
 auth.can("permission:post:edit").value;
+```
+
+#### Tenant support
+
+For multi-tenant apps, pass `tenant` in the context and resolve roles/permissions per tenant:
+
+```ts
+auth.attachPolicy(
+  rbacPolicy({
+    resolveRoles: (user, tenant) => (tenant ? user.rolesByTenant[tenant] : user.roles),
+    resolvePermissions: (user, tenant) => (tenant ? user.permissionsByTenant[tenant] : user.permissions),
+  }),
+);
+
+auth.can("role:admin", { tenant: "acme" }).value;
+auth.can("permission:post:edit", { tenant: "globex" }).value;
 ```
 
 ## Router integration

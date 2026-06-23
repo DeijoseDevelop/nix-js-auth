@@ -42,6 +42,7 @@ export function createAuth<
     defaultProvider,
     storage,
     autoRefresh,
+    seed,
     identity,
     onChange,
     onError,
@@ -249,6 +250,18 @@ export function createAuth<
     } finally {
       isReady.value = true;
     }
+  }
+
+  function isSeedFunction(
+    value: Session | (() => Session | null) | undefined,
+  ): value is () => Session | null {
+    return typeof value === "function";
+  }
+
+  // Seed initial session for SSR / server render
+  const initialSeed = isSeedFunction(seed) ? seed() : seed;
+  if (initialSeed) {
+    setSession(initialSeed);
   }
 
   // Initialize hydration asynchronously
