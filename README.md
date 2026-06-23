@@ -28,6 +28,7 @@ Authentication and authorization library for [Nix.js](https://nix-js.dev) built 
 - [Testing](#testing)
 - [Best practices](#best-practices)
 - [TypeScript](#typescript)
+- [API overview](#api-overview)
 - [FAQ](#faq)
 - [License](#license)
 
@@ -857,6 +858,58 @@ const auth = createAuth<MySession, MyUser, MyCredentials>({
 
 The returned `AuthInstance` is typed accordingly.
 
+## API overview
+
+### Core
+
+- `createAuth(options)` — reactive auth instance.
+- `createAuthManager()` — manage multiple named auth instances.
+- `auth.login(credentials)` / `auth.login("provider", credentials)`
+- `auth.logout()` / `auth.refresh()` / `auth.ready()`
+- `auth.session`, `auth.user`, `auth.token`, `auth.isAuthenticated`, `auth.isReady`, `auth.isLoading`, `auth.error`
+- `auth.setSession(session)`, `auth.clearSession()`
+- `auth.attachPolicy(policy)`, `auth.detachPolicy(policy)`
+- `auth.can(action, context?)`, `auth.authorize(action, context?)`
+- `auth.hasRole(role)`, `auth.hasPermission(permission)`, `auth.hasScope(scope)`
+- `auth.hasAnyRole(roles)`, `auth.hasAllPermissions(permissions)`
+
+### Drivers
+
+- `jwtDriver(options)` — JWT / Bearer token flow.
+- `sessionCookieDriver(options)` — `httpOnly` session cookie flow.
+- `mockDriver(options)` — testing and prototyping.
+- Custom driver via `AuthDriver` interface.
+
+### Providers
+
+- `credentialsProvider(options)` — email/password or custom credentials.
+- `apiKeyProvider(options)` — API-key authentication.
+- `oidcProvider(options)` — OIDC with PKCE.
+
+### Storage adapters
+
+- `localStorageAdapter({ key })`, `sessionStorageAdapter({ key })`, `cookieAdapter({ key })`, `memoryAdapter()`.
+
+### Policy engine
+
+- `createPolicy(evaluator)`
+- `rbacPolicy(options)` — supports tenant-aware resolvers.
+- `hasRole`, `hasPermission`, `hasScope`, `isOwner`, `all`, `any`, `not`.
+
+### Router
+
+- `authRouterPlugin(auth, router, options)`
+- `requireAuth`, `requireRole`, `requirePermission`, `requireProvider`, `requirePolicy`.
+
+### Optional command integration
+
+From `@deijose/nix-js-auth/command`:
+
+- `authCommand(auth, commandKey, executeFn, options?)`
+- `createLoginCommand(auth, commandKey, options?)`
+- `createLogoutCommand(auth, commandKey, options?)`
+- `authHeaders(auth)`
+
 ## FAQ
 
 ### Does the library work without a router?
@@ -865,7 +918,7 @@ Yes. Use `auth.isAuthenticated` and `auth.can()` directly in your components.
 
 ### Can I use multiple auth instances in the same app?
 
-Yes. Each `createAuth` returns an independent instance with its own signals. Future versions will add a formal `createAuthManager` helper.
+Yes. Use `createAuthManager` for named instances or call `createAuth` multiple times directly.
 
 ### What happens if the session expires while the user is using the app?
 
@@ -873,11 +926,11 @@ If the driver implements `refresh` and `getExpiry`, and `autoRefresh` is enabled
 
 ### How do I handle OAuth / OIDC?
 
-Write a driver that triggers the redirect in `login` and reads the resulting code/token in `hydrate` or after the redirect. A built-in OIDC provider is planned for v0.2.
+Use the built-in `oidcProvider` for a basic PKCE flow, or write a custom driver that handles the redirect and callback.
 
 ### How do I integrate with `nix-query`?
 
-You can call `createCommand` from `nix-query` inside your driver's `login` or `refresh` methods. The auth core itself stays dependency-free.
+Import `@deijose/nix-js-auth/command` and use `authCommand`, `createLoginCommand`, or `createLogoutCommand`.
 
 ## License
 
