@@ -1,4 +1,4 @@
-import { signal, computed, watch, batch } from "@deijose/nix-js";
+import { signal, computed, batch } from "@deijose/nix-js";
 import type { Signal } from "@deijose/nix-js";
 import type {
   AuthDriver,
@@ -93,6 +93,10 @@ export function createAuth<
 
   const isAuthenticated = computed(() => user.value !== null);
   const isAnonymous = computed(() => user.value === null);
+
+  const userRoles = computed(() => resolveRoles(user.value));
+  const userPermissions = computed(() => resolvePermissions(user.value));
+  const userScopes = computed(() => resolveScopes(user.value));
 
   const autoRefreshEnabled = Boolean(autoRefresh);
   const autoRefreshConfig = typeof autoRefresh === "object" ? autoRefresh : {};
@@ -223,8 +227,16 @@ export function createAuth<
     }
   }
 
-  async function ready(): Promise<void> {
-    if (isReady.value) return;
+  let readyPromise: Promise<void> | null = null;
+
+  function ready(): Promise<void> {
+    if (isReady.value) return Promise.resolve();
+    if (readyPromise) return readyPromise;
+    readyPromise = hydrate();
+    return readyPromise;
+  }
+
+  async function hydrate(): Promise<void> {
     const d = activeDriver.value;
     if (!storage) {
       isReady.value = true;
@@ -267,14 +279,6 @@ export function createAuth<
   // Initialize hydration asynchronously
   void ready();
 
-  watch(session, (next) => {
-    if (next) {
-      scheduleAutoRefresh(next);
-    } else {
-      clearAutoRefresh();
-    }
-  });
-
   function attachPolicy(policy: AuthPolicy<User, Session>): () => void {
     policies.push(policy);
     policiesVersion.value++;
@@ -308,12 +312,48 @@ export function createAuth<
     return false;
   }
 
+  function checkCan(action: string, context?: unknown): boolean {
+    const result = evaluatePolicies(action, context);
+    return isObject(result) ? result.allow : result;
+  }
+
+  function checkAuthorize(
+    action: string,
+    context?: unknown,
+  ): { allow: boolean; redirect?: string } {
+    const result = evaluatePolicies(action, context);
+    if (isObject(result)) {
+      return { allow: result.allow, redirect: result.redirect };
+    }
+    return { allow: result };
+  }
+
+  function checkRole(role: string): boolean {
+    return userRoles.value.includes(role);
+  }
+
+  function checkPermission(permission: string): boolean {
+    return userPermissions.value.includes(permission);
+  }
+
+  function checkScope(scope: string): boolean {
+    return userScopes.value.includes(scope);
+  }
+
+  function checkAnyRole(roles: string[]): boolean {
+    const current = userRoles.value;
+    return roles.some((role) => current.includes(role));
+  }
+
+  function checkAllPermissions(permissions: string[]): boolean {
+    const current = userPermissions.value;
+    return permissions.every((permission) => current.includes(permission));
+  }
+
   function can(action: string, context?: unknown): Signal<boolean> {
     return computed(() => {
       policiesVersion.value; // subscribe to policy changes
-      const result = evaluatePolicies(action, context);
-      if (isObject(result)) return result.allow;
-      return result;
+      return checkCan(action, context);
     });
   }
 
@@ -323,38 +363,32 @@ export function createAuth<
   ): Signal<{ allow: boolean; redirect?: string }> {
     return computed(() => {
       policiesVersion.value; // subscribe to policy changes
-      const result = evaluatePolicies(action, context);
-      if (isObject(result)) {
-        return { allow: result.allow, redirect: result.redirect };
-      }
-      return { allow: result };
+      return checkAuthorize(action, context);
     });
   }
 
   function hasRole(role: string): Signal<boolean> {
-    return computed(() => resolveRoles(user.value).includes(role));
+    return computed(() => checkRole(role));
   }
 
   function hasPermission(permission: string): Signal<boolean> {
-    return computed(() => resolvePermissions(user.value).includes(permission));
+    return computed(() => checkPermission(permission));
   }
 
   function hasScope(scope: string): Signal<boolean> {
-    return computed(() => resolveScopes(user.value).includes(scope));
+    return computed(() => checkScope(scope));
   }
 
   function hasAnyRole(roles: string[]): Signal<boolean> {
-    return computed(() => {
-      const userRoles = resolveRoles(user.value);
-      return roles.some((role) => userRoles.includes(role));
-    });
+    return computed(() => checkAnyRole(roles));
   }
 
   function hasAllPermissions(permissions: string[]): Signal<boolean> {
-    return computed(() => {
-      const userPermissions = resolvePermissions(user.value);
-      return permissions.every((permission) => userPermissions.includes(permission));
-    });
+    return computed(() => checkAllPermissions(permissions));
+  }
+
+  function dispose(): void {
+    clearAutoRefresh();
   }
 
   return {
@@ -383,5 +417,13 @@ export function createAuth<
     hasScope,
     hasAnyRole,
     hasAllPermissions,
+    checkCan,
+    checkAuthorize,
+    checkRole,
+    checkPermission,
+    checkScope,
+    checkAnyRole,
+    checkAllPermissions,
+    dispose,
   };
 }

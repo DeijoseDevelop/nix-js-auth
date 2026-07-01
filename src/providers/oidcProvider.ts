@@ -96,16 +96,23 @@ export function oidcProvider<User = unknown>(
     fetcher = globalThis.fetch.bind(globalThis),
   } = options;
 
-  let metadata: Record<string, unknown> | null = null;
+  let metadataPromise: Promise<Record<string, unknown>> | null = null;
 
   async function resolveMetadata(): Promise<Record<string, unknown>> {
-    if (metadata) return metadata;
-    const res = await fetcher(`${authority.replace(/\/$/, "")}/.well-known/openid-configuration`);
-    if (!res.ok) {
-      throw new Error(`[nix-auth] OIDC metadata discovery failed: ${res.status}`);
+    if (metadataPromise) return metadataPromise;
+    metadataPromise = (async () => {
+      const res = await fetcher(`${authority.replace(/\/$/, "")}/.well-known/openid-configuration`);
+      if (!res.ok) {
+        throw new Error(`[nix-auth] OIDC metadata discovery failed: ${res.status}`);
+      }
+      return (await res.json()) as Record<string, unknown>;
+    })();
+    try {
+      return await metadataPromise;
+    } catch (err) {
+      metadataPromise = null;
+      throw err;
     }
-    metadata = (await res.json()) as Record<string, unknown>;
-    return metadata;
   }
 
   async function buildLoginUrl(): Promise<OidcLoginUrl> {

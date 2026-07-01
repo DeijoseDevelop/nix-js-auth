@@ -26,7 +26,7 @@ function defaultCanMeta(
   fallbackRedirect: string,
 ): NavigationGuardResult {
   const actions = Array.isArray(meta) ? meta : [meta];
-  const allowed = actions.some((action) => auth.can(action).value);
+  const allowed = actions.some((action) => auth.checkCan(action));
   return allowed ? undefined : fallbackRedirect;
 }
 
@@ -45,22 +45,22 @@ async function defaultObjectMeta(
 
   if (meta.can) {
     const context = resolveContext(meta.context);
-    return auth.can(meta.can, context).value ? undefined : redirect;
+    return auth.checkCan(meta.can, context) ? undefined : redirect;
   }
 
-  if (meta.role && !auth.hasRole(meta.role).value) {
+  if (meta.role && !auth.checkRole(meta.role)) {
     return redirect;
   }
 
-  if (meta.roles && !auth.hasAnyRole(meta.roles).value) {
+  if (meta.roles && !auth.checkAnyRole(meta.roles)) {
     return redirect;
   }
 
-  if (meta.permission && !auth.hasPermission(meta.permission).value) {
+  if (meta.permission && !auth.checkPermission(meta.permission)) {
     return redirect;
   }
 
-  if (meta.permissions && !auth.hasAllPermissions(meta.permissions).value) {
+  if (meta.permissions && !auth.checkAllPermissions(meta.permissions)) {
     return redirect;
   }
 

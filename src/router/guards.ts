@@ -13,7 +13,7 @@ export function requireRole<Session, User>(
   role: string,
   redirect = "/unauthorized",
 ): NavigationGuard {
-  return () => (auth.hasRole(role).value ? undefined : redirect);
+  return () => (auth.checkRole(role) ? undefined : redirect);
 }
 
 export function requirePermission<Session, User>(
@@ -21,7 +21,7 @@ export function requirePermission<Session, User>(
   permission: string,
   redirect = "/unauthorized",
 ): NavigationGuard {
-  return () => (auth.hasPermission(permission).value ? undefined : redirect);
+  return () => (auth.checkPermission(permission) ? undefined : redirect);
 }
 
 export function requireProvider<Session, User>(

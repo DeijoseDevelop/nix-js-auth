@@ -102,4 +102,14 @@ export interface AuthInstance<Session = unknown, User = unknown, Credentials = u
   hasScope(scope: string): Signal<boolean>;
   hasAnyRole(roles: string[]): Signal<boolean>;
   hasAllPermissions(permissions: string[]): Signal<boolean>;
+
+  checkCan(action: string, context?: unknown): boolean;
+  checkAuthorize(action: string, context?: unknown): { allow: boolean; redirect?: string };
+  checkRole(role: string): boolean;
+  checkPermission(permission: string): boolean;
+  checkScope(scope: string): boolean;
+  checkAnyRole(roles: string[]): boolean;
+  checkAllPermissions(permissions: string[]): boolean;
+
+  dispose(): void;
 }

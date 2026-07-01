@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.1.0
+
+### Added
+
+- Non-reactive authorization helpers on `AuthInstance`: `checkCan`, `checkAuthorize`, `checkRole`, `checkPermission`, `checkScope`, `checkAnyRole`, `checkAllPermissions`. These return plain values instead of signals and are ideal for router guards and one-off checks.
+- `dispose()` on `AuthInstance` to release the pending auto-refresh timer and prevent leaks when instances are discarded (SSR-per-request, tests).
+
+### Changed
+
+- **Performance:** removed the redundant `watch(session, ...)` that scheduled the auto-refresh a second time on every session change; scheduling now happens once via `setSession`.
+- **Performance:** router guards (`requireRole`, `requirePermission`) and `authRouterPlugin` now use the non-reactive `check*` helpers instead of creating throwaway `computed` signals on every navigation.
+- **Performance:** `user` roles/permissions/scopes are now derived via memoized `computed`s and reused across reactive and non-reactive checks.
+- **Performance:** `ready()` memoizes the in-flight hydration promise, so concurrent calls (e.g. multiple navigations during startup) no longer trigger duplicate `storage.get()` reads.
+- **Performance:** `oidcProvider.resolveMetadata()` memoizes the discovery promise to deduplicate concurrent metadata fetches (resets on error to allow retry).
+
 ## 1.0.1
 
 ### Changed
