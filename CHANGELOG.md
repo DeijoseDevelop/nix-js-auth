@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.2.0
+
+### Added
+
+- **Transient error handling in `refresh()`**: `refreshOptions` with `maxRetries`, `retryDelay`, and `isTransientError` predicate. Network errors (5xx, 429, TypeError) are retried with exponential backoff while keeping the session alive. Only 401/403 errors trigger logout.
+- **`ready({ force: true })`**: forces re-hydration, bypassing the memoized promise. Rejected promises are no longer cached, allowing automatic retry on the next call.
+- **Multi-tab synchronization**: `multiTabSync: { enabled: true }` option uses `BroadcastChannel` to broadcast `auth:login` and `auth:logout` events across browser tabs. Includes loop prevention.
+- **`useAuth()` is now reactive**: returns a `Signal<AuthInstance | undefined>` that tracks the active auth instance. Use `setActiveAuth()` for dynamic multi-tenant switching.
+- **`getAuth()`**: non-reactive one-off accessor for guards and plugins.
+- **`setActiveAuth()`**: sets the global active auth instance for reactive `useAuth()`.
+- **`oidcProvider.performLogout(session, options)`**: builds the end_session URL and executes the redirect (or background fetch) automatically. Supports `mode: "redirect" | "fetch"` and custom `redirect` function.
+- **`authRouterPlugin` meta cache**: `metaCacheTtl` option caches meta resolution results per route path for a configurable TTL, reducing latency on repeated navigations with async meta functions.
+- **`cookieAdapter` security warning**: emits `console.warn` by default when storing data in JS-accessible cookies. Suppress with `suppressSecurityWarning: true`.
+- **`RefreshOptions` and `MultiTabSyncOptions` types** exported from the package.
+
+### Fixed
+
+- **`refresh()` no longer logs out on transient errors**: previously, any error during refresh (including network glitches and 502s) would immediately log the user out. Now only 401/403 errors invalidate the session.
+- **`AuthManager.remove()` and `clear()` now call `dispose()`**: prevents memory leaks from orphaned auto-refresh timers and BroadcastChannel connections.
+- **`ready()` no longer caches rejected promises**: a failed hydration no longer blocks all future `ready()` calls. The `isReady` flag is only set on success.
+- **`useAuth()` reactivity**: previously returned a plain value that didn't update when the auth instance changed. Now returns a reactive Signal.
+
 ## 1.1.0
 
 ### Added

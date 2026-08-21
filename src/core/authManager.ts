@@ -32,12 +32,19 @@ export function createAuthManager(): AuthManager {
       return instances.has(name);
     },
     remove(name) {
-      instances.delete(name);
+      const instance = instances.get(name);
+      if (instance) {
+        instance.dispose();
+        instances.delete(name);
+      }
     },
     list() {
       return [...instances.keys()];
     },
     clear() {
+      for (const instance of instances.values()) {
+        instance.dispose();
+      }
       instances.clear();
     },
   };

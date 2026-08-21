@@ -7,6 +7,7 @@ import type {
   CreateAuthOptions,
   AuthInstance,
   PolicyDecision,
+  RefreshOptions,
 } from "./types";
 
 function makeResolver<User>(
@@ -29,6 +30,29 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
+function getErrorStatus(error: unknown): number | undefined {
+  if (!isObject(error)) return undefined;
+  const status = (error as { status?: unknown }).status;
+  return typeof status === "number" ? status : undefined;
+}
+
+function defaultIsTransientError(error: unknown): boolean {
+  // TypeError = network failure (fetch throws TypeError on network errors)
+  if (error instanceof TypeError) return true;
+  const status = getErrorStatus(error);
+  if (status === undefined) return true; // unknown error, assume transient
+  return status >= 500 || status === 429;
+}
+
+function defaultRetryDelay(failureCount: number): number {
+  return Math.min(1000 * 2 ** failureCount, 5000);
+}
+
+function isAuthError(error: unknown): boolean {
+  const status = getErrorStatus(error);
+  return status === 401 || status === 403;
+}
+
 export function createAuth<
   Session = unknown,
   User = unknown,
@@ -47,6 +71,8 @@ export function createAuth<
     onChange,
     onError,
     name = "default",
+    refreshOptions = {},
+    multiTabSync = {},
   } = options;
 
   if (!driver && !providers) {
@@ -144,6 +170,7 @@ export function createAuth<
     onChange?.(next);
     if (next) {
       scheduleAutoRefresh(next);
+      _broadcast("auth:login", next);
     } else {
       clearAutoRefresh();
     }
@@ -152,9 +179,59 @@ export function createAuth<
   function clearSession() {
     clearAutoRefresh();
     setSession(null);
+    _broadcast("auth:logout", null);
     if (hasProviders) {
       activeDriver.value = defaultProvider ? providerMap[defaultProvider] : null;
       activeProvider.value = defaultProvider ?? null;
+    }
+  }
+
+  // ─── Multi-tab sync via BroadcastChannel (Fix #7) ──────────────────────
+  let _broadcastChannel: BroadcastChannel | null = null;
+  let _isSyncingFromBroadcast = false;
+
+  function _initMultiTabSync(): void {
+    if (!multiTabSync.enabled) return;
+    if (typeof globalThis === "undefined" || typeof BroadcastChannel === "undefined") return;
+
+    const channelName = multiTabSync.channelName ?? `nix-auth:${name}`;
+    _broadcastChannel = new BroadcastChannel(channelName);
+
+    _broadcastChannel.addEventListener("message", (event) => {
+      const data = event.data as { type: string; session: Session | null };
+      if (!data || typeof data.type !== "string") return;
+
+      _isSyncingFromBroadcast = true;
+      try {
+        if (data.type === "auth:login" || data.type === "auth:refresh") {
+          if (data.session !== null) {
+            setSession(data.session);
+          }
+        } else if (data.type === "auth:logout") {
+          clearAutoRefresh();
+          session.value = null;
+          error.value = null;
+          if (storage) {
+            try { void storage.set(null); } catch { /* ignore */ }
+          }
+          if (hasProviders) {
+            activeDriver.value = defaultProvider ? providerMap[defaultProvider] : null;
+            activeProvider.value = defaultProvider ?? null;
+          }
+        }
+        onError?.(null, "sync");
+      } finally {
+        _isSyncingFromBroadcast = false;
+      }
+    });
+  }
+
+  function _broadcast(type: string, nextSession: Session | null): void {
+    if (!_broadcastChannel || _isSyncingFromBroadcast) return;
+    try {
+      _broadcastChannel.postMessage({ type, session: nextSession });
+    } catch {
+      // Ignore broadcast errors
     }
   }
 
@@ -209,30 +286,76 @@ export function createAuth<
     clearSession();
   }
 
+  const _refreshCfg: Required<RefreshOptions> = {
+    maxRetries: refreshOptions.maxRetries ?? 3,
+    retryDelay: refreshOptions.retryDelay ?? defaultRetryDelay,
+    isTransientError: refreshOptions.isTransientError ?? defaultIsTransientError,
+  };
+
+  function _computeRetryDelay(failureCount: number): number {
+    const policy = _refreshCfg.retryDelay;
+    if (typeof policy === "function") return Math.max(0, policy(failureCount));
+    return Math.max(0, policy);
+  }
+
   async function refresh(): Promise<void> {
     const current = session.value;
     const d = activeDriver.value;
     if (!current || !d?.refresh) return;
     isLoading.value = true;
-    try {
-      const next = await d.refresh(current);
-      setSession(next);
-    } catch (err) {
-      error.value = err;
-      onError?.(err, "refresh");
-      await logout();
-      throw err;
-    } finally {
-      isLoading.value = false;
+
+    let failures = 0;
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      try {
+        const next = await d.refresh(current);
+        setSession(next);
+        return;
+      } catch (err) {
+        failures++;
+
+        // Auth errors (401/403) → session is truly invalid, logout.
+        if (isAuthError(err)) {
+          error.value = err;
+          onError?.(err, "refresh");
+          isLoading.value = false;
+          await logout();
+          throw err;
+        }
+
+        // Transient error → retry with backoff, keep session alive.
+        if (_refreshCfg.isTransientError(err) && failures <= _refreshCfg.maxRetries) {
+          onError?.(err, "refresh");
+          const delay = _computeRetryDelay(failures);
+          if (delay > 0) {
+            await new Promise((resolve) => setTimeout(resolve, delay));
+          }
+          continue;
+        }
+
+        // Non-transient or max retries exhausted → keep session as stale but
+        // don't logout. The user keeps access until the token truly expires.
+        error.value = err;
+        onError?.(err, "refresh");
+        isLoading.value = false;
+        throw err;
+      }
     }
   }
 
   let readyPromise: Promise<void> | null = null;
+  let readyRejected = false;
 
-  function ready(): Promise<void> {
-    if (isReady.value) return Promise.resolve();
-    if (readyPromise) return readyPromise;
-    readyPromise = hydrate();
+  function ready(options?: { force?: boolean }): Promise<void> {
+    const force = options?.force ?? false;
+    if (isReady.value && !force) return Promise.resolve();
+    // Don't return a cached rejected promise — allow retry.
+    if (readyPromise && !readyRejected && !force) return readyPromise;
+    readyRejected = false;
+    readyPromise = hydrate().catch((err) => {
+      readyRejected = true;
+      throw err;
+    });
     return readyPromise;
   }
 
@@ -256,11 +379,12 @@ export function createAuth<
       if (hydrated !== null) {
         setSession(hydrated);
       }
+      isReady.value = true;
     } catch (err) {
       error.value = err;
       onError?.(err, "hydrate");
-    } finally {
-      isReady.value = true;
+      // Don't set isReady on failure — allows ready() to retry.
+      throw err;
     }
   }
 
@@ -275,6 +399,9 @@ export function createAuth<
   if (initialSeed) {
     setSession(initialSeed);
   }
+
+  // Initialize multi-tab sync (Fix #7)
+  _initMultiTabSync();
 
   // Initialize hydration asynchronously
   void ready();
@@ -389,6 +516,10 @@ export function createAuth<
 
   function dispose(): void {
     clearAutoRefresh();
+    if (_broadcastChannel) {
+      _broadcastChannel.close();
+      _broadcastChannel = null;
+    }
   }
 
   return {

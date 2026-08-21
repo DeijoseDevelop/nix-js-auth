@@ -6,7 +6,8 @@ export type AuthEvent =
   | "refresh"
   | "hydrate"
   | "setSession"
-  | "clearSession";
+  | "clearSession"
+  | "sync";
 
 export interface AuthDriver<Session = unknown, User = unknown, Credentials = unknown> {
   readonly name: string;
@@ -41,6 +42,37 @@ export interface AutoRefreshOptions<Session> {
   schedule?: (session: Session, refresh: () => Promise<void>) => (() => void);
 }
 
+export interface RefreshOptions {
+  /**
+   * Maximum number of retries for transient network errors before giving up.
+   * @default 3
+   */
+  maxRetries?: number;
+  /**
+   * Delay between retries in ms, or a function receiving the failure count.
+   * @default (n) => Math.min(1000 * 2 ** n, 5000)
+   */
+  retryDelay?: number | ((failureCount: number) => number);
+  /**
+   * Predicate to determine if an error is transient (network glitch, 5xx).
+   * If true, the session is kept and a retry is scheduled.
+   * If false, the session is invalidated (logout).
+   * @default (error) => status === undefined || status >= 500 || status === 429 || error is TypeError
+   */
+  isTransientError?: (error: unknown) => boolean;
+}
+
+export interface MultiTabSyncOptions {
+  /**
+   * Channel name for BroadcastChannel. Defaults to `nix-auth:<name>`.
+   */
+  channelName?: string;
+  /**
+   * Whether multi-tab sync is enabled. @default false
+   */
+  enabled?: boolean;
+}
+
 export interface CreateAuthOptions<Session, User, Credentials> {
   driver?: AuthDriver<Session, User, Credentials>;
   providers?: Record<string, AuthDriver<Session, User, Credentials>>;
@@ -56,6 +88,11 @@ export interface CreateAuthOptions<Session, User, Credentials> {
   onError?: (error: unknown, event: AuthEvent) => void;
 
   name?: string;
+
+  /** Configuration for transient error handling during refresh. */
+  refreshOptions?: RefreshOptions;
+  /** Multi-tab synchronization via BroadcastChannel. */
+  multiTabSync?: MultiTabSyncOptions;
 }
 
 export type PolicyDecision = boolean | { allow: boolean; redirect?: string };
@@ -88,7 +125,7 @@ export interface AuthInstance<Session = unknown, User = unknown, Credentials = u
   login(provider: string, credentials: Credentials): Promise<void>;
   logout(): Promise<void>;
   refresh(): Promise<void>;
-  ready(): Promise<void>;
+  ready(options?: { force?: boolean }): Promise<void>;
   setSession(session: Session | null): void;
   clearSession(): void;
 

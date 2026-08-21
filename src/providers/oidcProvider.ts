@@ -38,6 +38,17 @@ export interface OidcProvider<User = unknown>
   buildLoginUrl(): Promise<OidcLoginUrl>;
   buildLogoutUrl(idToken?: string): Promise<string>;
   resolveMetadata(): Promise<Record<string, unknown>>;
+  /**
+   * Builds the end_session URL and performs the redirect (or fetch) to
+   * log the user out from the OIDC provider. Cleans up local state.
+   * (Fix #8)
+   */
+  performLogout(session: OidcSession<User>, options?: {
+    /** Redirect mode: "redirect" (default) navigates the browser, "fetch" does a background request. */
+    mode?: "redirect" | "fetch";
+    /** Custom redirect implementation (defaults to window.location.href). */
+    redirect?: (url: string) => void;
+  }): Promise<void>;
 }
 
 function hasCrypto(): boolean {
@@ -212,7 +223,39 @@ export function oidcProvider<User = unknown>(
 
   async function logout(_session: OidcSession<User>): Promise<void> {
     // Server-side logout is typically handled by redirecting to end_session_endpoint.
-    // This hook can be extended to perform a fetch if needed.
+    // Use performLogout() for automatic redirect/fetch.
+  }
+
+  async function performLogout(
+    session: OidcSession<User>,
+    options: {
+      mode?: "redirect" | "fetch";
+      redirect?: (url: string) => void;
+    } = {},
+  ): Promise<void> {
+    const { mode = "redirect", redirect } = options;
+    const url = await buildLogoutUrl(session.idToken);
+
+    if (mode === "fetch") {
+      // Background fetch logout (if the provider supports it via back-channel).
+      try {
+        await fetcher(url, { method: "GET", credentials: "include" });
+      } catch {
+        // Ignore network errors during back-channel logout.
+      }
+      return;
+    }
+
+    // Redirect mode — navigate the browser to the end_session endpoint.
+    if (redirect) {
+      redirect(url);
+    } else if (typeof globalThis !== "undefined" && "location" in globalThis) {
+      globalThis.location.href = url;
+    } else {
+      throw new Error(
+        "[nix-auth] OIDC performLogout: no redirect function provided and window.location is unavailable.",
+      );
+    }
   }
 
   return {
@@ -222,6 +265,7 @@ export function oidcProvider<User = unknown>(
     resolveMetadata,
     buildLoginUrl,
     buildLogoutUrl,
+    performLogout,
     toUser: (session) => session.user,
     getToken: (session) => session.accessToken,
     getExpiry: (session) => session.expiresAt,

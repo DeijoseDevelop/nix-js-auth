@@ -129,11 +129,24 @@ interface CreateAuthOptions<Session, User, Credentials> {
   onChange?: (session: Session | null) => void;
   onError?: (error: unknown, event: AuthEvent) => void;
   name?: string;
+  refreshOptions?: RefreshOptions;
+  multiTabSync?: MultiTabSyncOptions;
 }
 
 interface AutoRefreshOptions<Session> {
   beforeExpirySeconds?: number;
   schedule?: (session: Session, refresh: () => Promise<void>) => (() => void);
+}
+
+interface RefreshOptions {
+  maxRetries?: number; // default: 3
+  retryDelay?: number | ((failureCount: number) => number); // default: exponential
+  isTransientError?: (error: unknown) => boolean; // default: 5xx, 429, TypeError
+}
+
+interface MultiTabSyncOptions {
+  enabled?: boolean; // default: false
+  channelName?: string; // default: "nix-auth:<name>"
 }
 ```
 
@@ -324,6 +337,44 @@ const driver = {
 };
 ```
 
+### Refresh error handling (v1.2)
+
+By default, `refresh()` retries transient errors (5xx, 429, network failures)
+up to 3 times with exponential backoff, keeping the session alive. Only
+401/403 errors trigger logout.
+
+```ts
+const auth = createAuth({
+  driver,
+  autoRefresh: true,
+  refreshOptions: {
+    maxRetries: 5,
+    retryDelay: (failureCount) => Math.min(1000 * 2 ** failureCount, 10000),
+    isTransientError: (err) => {
+      // Custom predicate — return true to retry, false to logout
+      const status = (err as { status?: number }).status;
+      return status === undefined || status >= 500 || status === 429;
+    },
+  },
+});
+```
+
+### Multi-tab synchronization (v1.2)
+
+Enable `multiTabSync` to broadcast login/logout events across browser tabs
+via `BroadcastChannel`:
+
+```ts
+const auth = createAuth({
+  driver,
+  storage: localStorageAdapter({ key: "app:session" }),
+  multiTabSync: { enabled: true },
+});
+```
+
+When the user logs in on Tab A, Tab B receives the session automatically.
+When the user logs out on any tab, all tabs clear the session.
+
 ## Providers
 
 A provider is a named driver. This is useful when an app supports multiple authentication mechanisms.
@@ -411,10 +462,15 @@ const session = await auth.login({
   nonce: savedNonce,
 });
 
-// 3. Logout redirect
-const logoutUrl = await provider.buildLogoutUrl(session.idToken);
-window.location.href = logoutUrl;
+// 3. Logout — performLogout builds the URL and redirects automatically
+await provider.performLogout(session, { mode: "redirect" });
+// Or use a background fetch for back-channel logout:
+// await provider.performLogout(session, { mode: "fetch" });
 ```
+
+`performLogout(session, options)` (v1.2) builds the end_session URL and
+executes the redirect (or background fetch) automatically. Supports a custom
+`redirect` function for testing or non-browser environments.
 
 ## Storage adapters
 
@@ -439,12 +495,24 @@ Persists to `sessionStorage`.
 
 ### `cookieAdapter({ key })`
 
-Persists to `document.cookie`. Useful for non-`httpOnly` session data or for sharing small state with the server.
+Persists to `document.cookie`. Useful for non-`httpOnly` session data or for
+sharing small state with the server.
+
+> ⚠️ **Security warning**: Cookies set via `document.cookie` are accessible
+> from JavaScript and vulnerable to XSS attacks. **Do NOT store JWTs or
+> access tokens here.** Use `sessionCookieDriver` (httpOnly) or
+> `localStorageAdapter` instead. The adapter emits a `console.warn` by
+> default; set `suppressSecurityWarning: true` to silence it.
 
 ```ts
 const auth = createAuth({
   driver,
-  storage: cookieAdapter({ key: "app:session", days: 7, sameSite: "lax" }),
+  storage: cookieAdapter({
+    key: "app:session",
+    days: 7,
+    sameSite: "lax",
+    suppressSecurityWarning: true, // only if storing non-sensitive data
+  }),
 });
 ```
 
@@ -684,18 +752,32 @@ router.beforeEach(
 
 ```ts
 import { provide } from "@deijose/nix-js";
-import { AuthKey, useAuth } from "@deijose/nix-js-auth";
+import { AuthKey, useAuth, setActiveAuth } from "@deijose/nix-js-auth";
 
 provide(AuthKey, auth);
 
-// In a descendant component:
-const auth = useAuth();
-if (auth) {
-  console.log(auth.isAuthenticated.value);
+// Or set globally for multi-tenant reactive switching:
+setActiveAuth(auth);
+
+// In a descendant component — useAuth() returns a reactive Signal:
+const authSignal = useAuth();
+// authSignal.value is the AuthInstance | undefined
+if (authSignal.value) {
+  console.log(authSignal.value.isAuthenticated.value);
 }
+
+// Non-reactive access (for guards, plugins):
+import { getAuth } from "@deijose/nix-js-auth";
+const auth = getAuth();
 ```
 
-The library is fully usable without `provide/inject` if you prefer to export the instance directly.
+`useAuth()` returns a `Signal<AuthInstance | undefined>` that tracks the
+active auth instance. When you call `setActiveAuth(newAuth)`, all components
+using `useAuth()` re-render with the new instance — useful for multi-tenant
+dynamic switching.
+
+The library is fully usable without `provide/inject` if you prefer to export
+the instance directly.
 
 ## Multi-provider
 
@@ -827,7 +909,10 @@ describe("auth", () => {
 - **Separate policies**: split domain-specific rules into multiple policies instead of one giant function.
 - **Custom redirect**: use `redirect` in `meta.auth` or a custom `interpretMeta` for route-specific behavior.
 - **Do not store tokens in plain localStorage for production**: use `httpOnly` cookies when possible. Provide a `sessionCookieDriver` or custom driver that reads the cookie.
+- **Never store JWTs in `cookieAdapter`**: cookies set via `document.cookie` are JS-accessible and XSS-vulnerable. Use `sessionCookieDriver` (httpOnly) instead.
 - **Hydrate safely**: implement `hydrate` in the driver to validate the stored session on startup.
+- **Enable multi-tab sync**: use `multiTabSync: { enabled: true }` so login/logout propagates across tabs.
+- **Use `refreshOptions`**: configure retry behavior to avoid logging users out on transient network errors.
 
 ## TypeScript
 

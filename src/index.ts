@@ -12,6 +12,8 @@ export type {
   PolicyDecision,
   AuthEvent,
   AutoRefreshOptions,
+  RefreshOptions,
+  MultiTabSyncOptions,
 } from "./core/types";
 
 export { jwtDriver } from "./drivers/jwtDriver";
@@ -88,4 +90,4 @@ export type {
   MetaInterpreter,
 } from "./router/meta";
 
-export { AuthKey, useAuth } from "./inject";
+export { AuthKey, useAuth, getAuth, setActiveAuth } from "./inject";

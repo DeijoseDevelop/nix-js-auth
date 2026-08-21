@@ -8,6 +8,11 @@ export interface AuthRouterPluginOptions {
   defaultRedirect?: string;
   fallbackRedirect?: string;
   interpretMeta?: MetaInterpreter;
+  /**
+   * Time-to-live in ms for cached meta resolution results per route path.
+   * Set to 0 to disable caching. @default 0 (disabled by default for safety)
+   */
+  metaCacheTtl?: number;
 }
 
 function isPublicPath(path: string, patterns: (string | RegExp)[]): boolean {
@@ -120,7 +125,29 @@ export function authRouterPlugin<Session, User>(
     defaultRedirect = "/login",
     fallbackRedirect = "/unauthorized",
     interpretMeta,
+    metaCacheTtl = 0,
   } = options;
+
+  // Meta resolution cache (Fix #5): caches the result of interpretMeta per
+  // route path for a short TTL. Only enabled when metaCacheTtl > 0.
+  const _CACHE_MISS = Symbol("cache-miss");
+  const _metaCache = new Map<string, { result: NavigationGuardResult | typeof _CACHE_MISS; expiresAt: number }>();
+
+  function getCachedMeta(path: string): NavigationGuardResult | typeof _CACHE_MISS {
+    if (metaCacheTtl <= 0) return _CACHE_MISS;
+    const entry = _metaCache.get(path);
+    if (!entry) return _CACHE_MISS;
+    if (Date.now() > entry.expiresAt) {
+      _metaCache.delete(path);
+      return _CACHE_MISS;
+    }
+    return entry.result;
+  }
+
+  function setCachedMeta(path: string, result: NavigationGuardResult): void {
+    if (metaCacheTtl <= 0) return;
+    _metaCache.set(path, { result, expiresAt: Date.now() + metaCacheTtl });
+  }
 
   return async (to, from) => {
     await auth.ready();
@@ -133,13 +160,23 @@ export function authRouterPlugin<Session, User>(
       return defaultRedirect;
     }
 
+    // Check meta cache first (Fix #5)
+    const cached = getCachedMeta(to);
+    if (cached !== _CACHE_MISS) {
+      return cached;
+    }
+
     const resolved = router.resolve(to);
     const meta = resolved.route?.meta?.auth as RouteAuthMeta | undefined;
 
+    let result: NavigationGuardResult;
     if (interpretMeta) {
-      return await interpretMeta(meta, auth, to, from);
+      result = await interpretMeta(meta, auth, to, from);
+    } else {
+      result = await defaultMetaInterpreter(meta, auth, to, from, fallbackRedirect);
     }
 
-    return await defaultMetaInterpreter(meta, auth, to, from, fallbackRedirect);
+    setCachedMeta(to, result);
+    return result;
   };
 }
